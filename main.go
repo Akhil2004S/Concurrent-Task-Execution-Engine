@@ -3,59 +3,31 @@ package main
 import (
 	"fmt"
 	"sync"
+
+	"execEngine/tasks"
+	"execEngine/workers"
 )
 
-type Task struct {
-	id       int
-	function func(numbers ...int) int
-	numTasks int
-}
-
-type TaskQueue struct {
-	tasks chan Task
-}
-
-func CreateTasks(id int, queue *TaskQueue) {
-	task := Task{
-		id:       id,
-		function: add,
-	}
-	queue.tasks <- task
-}
-
-func add(numbers ...int) int {
-	sum := 0
-	for _, number := range numbers {
-		sum += number
-	}
-	return sum
-}
-
-func worker(id int, taskQueue *TaskQueue, wg *sync.WaitGroup, numbers ...int) {
-	defer wg.Done()
-	for task := range taskQueue.tasks {
-		task.function(numbers...)
-		fmt.Printf("Task %d is executed by worker %d\n", task.id, id)
-	}
-}
-
 func main() {
-	numWorkers := 10
+	numWorkers := 4
 
-	taskQueue := &TaskQueue{}
-	taskQueue.tasks = make(chan Task)
+	taskQueue := &tasks.TaskQueue{}
+	taskQueue.Tasks = make(chan *tasks.Task)
 
 	var wg sync.WaitGroup
 
 	for w := range numWorkers {
 		wg.Add(1)
-		go worker(w, taskQueue, &wg, 1, 1)
+		go workers.Worker(w, taskQueue, &wg)
 	}
 
-	for id := range 10 {
-		CreateTasks(id, taskQueue)
+	for id := range 3 {
+		err := tasks.CreateTasks(id, "add", taskQueue, 1, 1)
+		if err != nil {
+			fmt.Println(err)
+		}
 	}
-	close(taskQueue.tasks)
+	close(taskQueue.Tasks)
 
 	wg.Wait()
 }

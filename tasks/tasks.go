@@ -3,10 +3,11 @@ package tasks
 import "errors"
 
 type Task struct {
-	Id       int
-	TaskType string
-	Data     []any
-	State    TaskState
+	Id          int
+	TaskType    string
+	Data        []any
+	State       TaskState
+	FailureData Failure
 }
 
 type TaskQueue struct {
@@ -45,10 +46,11 @@ func CreateTasks(id int, taskType string, queue *TaskQueue, data ...any) error {
 		}
 	}
 	task := &Task{
-		Id:       id,
-		TaskType: taskType,
-		Data:     data,
-		State:    Pending,
+		Id:          id,
+		TaskType:    taskType,
+		Data:        data,
+		State:       Pending,
+		FailureData: Failure{},
 	}
 	queue.Tasks <- task
 	return nil

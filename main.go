@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	numWorkers := 4
+	numWorkers := 5
 
 	taskQueue := &tasks.TaskQueue{}
 	taskQueue.Tasks = make(chan *tasks.Task)
@@ -21,8 +21,15 @@ func main() {
 		go workers.Worker(w, taskQueue, &wg)
 	}
 
-	for id := range 3 {
+	for id := range 5 {
 		err := tasks.CreateTasks(id, "add", taskQueue, 1, 1)
+		if err != nil {
+			fmt.Println(err)
+		}
+	}
+
+	for id := range 10 {
+		err := tasks.CreateTasks(id, "mul", taskQueue, 1, 1)
 		if err != nil {
 			fmt.Println(err)
 		}

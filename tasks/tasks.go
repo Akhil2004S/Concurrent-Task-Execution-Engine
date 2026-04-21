@@ -1,6 +1,9 @@
 package tasks
 
-import "errors"
+import (
+	"errors"
+	"sync"
+)
 
 type Task struct {
 	Id          int
@@ -8,13 +11,14 @@ type Task struct {
 	Data        []any
 	State       TaskState
 	FailureData Failure
+	RetryData   Retry
 }
 
 type TaskQueue struct {
 	Tasks chan *Task
 }
 
-func CreateTasks(id int, taskType string, queue *TaskQueue, data ...any) error {
+func CreateTasks(id int, taskType string, queue *TaskQueue, taskWg *sync.WaitGroup, data ...any) error {
 	switch taskType {
 	case "add":
 		for _, value := range data {
@@ -51,7 +55,9 @@ func CreateTasks(id int, taskType string, queue *TaskQueue, data ...any) error {
 		Data:        data,
 		State:       Pending,
 		FailureData: Failure{},
+		RetryData:   Retry{RetryLimit: 3},
 	}
 	queue.Tasks <- task
+	taskWg.Add(1)
 	return nil
 }

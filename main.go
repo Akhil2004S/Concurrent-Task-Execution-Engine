@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	numWorkers := 5
+	numWorkers := 2
 
 	taskQueue := &tasks.TaskQueue{}
 	taskQueue.Tasks = make(chan *tasks.Task)
@@ -29,12 +29,12 @@ func main() {
 		}
 	}
 
-	for id := range 1 {
-		err := tasks.CreateTasks(id, "mul", taskQueue, &taskWg, 1, 1)
-		if err != nil {
-			fmt.Println(err)
-		}
-	}
+	// for id := range 1 {
+	// 	err := tasks.CreateTasks(id, "mul", taskQueue, &taskWg, 1, 1)
+	// 	if err != nil {
+	// 		fmt.Println(err)
+	// 	}
+	// }
 
 	taskWg.Wait()
 	close(taskQueue.Tasks)

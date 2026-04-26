@@ -3,6 +3,7 @@ package tasks
 import (
 	"errors"
 	"sync"
+	"time"
 )
 
 type Task struct {
@@ -12,6 +13,7 @@ type Task struct {
 	State       TaskState
 	FailureData Failure
 	RetryData   Retry
+	TimeLimit   time.Duration
 }
 
 type TaskQueue struct {
@@ -55,7 +57,8 @@ func CreateTasks(id int, taskType string, queue *TaskQueue, taskWg *sync.WaitGro
 		Data:        data,
 		State:       Pending,
 		FailureData: Failure{},
-		RetryData:   Retry{RetryLimit: 3},
+		RetryData:   Retry{RetryLimit: 1},
+		TimeLimit:   1 * time.Nanosecond,
 	}
 	queue.Tasks <- task
 	taskWg.Add(1)

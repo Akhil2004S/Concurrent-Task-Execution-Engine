@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 
+	"execEngine/scheduler"
 	"execEngine/tasks"
 	"execEngine/workers"
 )
@@ -12,14 +13,20 @@ func main() {
 	numWorkers := 2
 
 	taskQueue := &tasks.TaskQueue{}
+	retryQueue := &tasks.RetryQueue{}
 	taskQueue.Tasks = make(chan *tasks.Task)
+	retryQueue.Tasks = make(chan *tasks.Task, 10)
 
 	var wg sync.WaitGroup
 	var taskWg sync.WaitGroup
+	var schedWg sync.WaitGroup
+
+	schedWg.Add(1)
+	go scheduler.Schedule(&schedWg, retryQueue.Tasks)
 
 	for w := range numWorkers {
 		wg.Add(1)
-		go workers.Worker(w, taskQueue, &wg, &taskWg)
+		go workers.Worker(w, taskQueue, retryQueue, &wg, &taskWg, &schedWg)
 	}
 
 	for id := range 3 {
@@ -39,4 +46,5 @@ func main() {
 	taskWg.Wait()
 	close(taskQueue.Tasks)
 	wg.Wait()
+	schedWg.Wait()
 }

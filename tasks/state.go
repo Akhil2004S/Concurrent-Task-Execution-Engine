@@ -18,7 +18,7 @@ var TaskStateName = map[TaskState]string{
 
 func (task *Task) ChangeTaskState(newState TaskState) bool {
 	// Returns if true if the transition is a success
-	if (task.State == Pending && newState == Running) || (task.State == Running && newState == Completed) || (task.State == Running && newState == Failed) {
+	if (task.State == Pending && newState == Running) || (task.State == Running && newState == Completed) || (task.State == Running && newState == Failed) || (task.State == Failed && newState == Running) {
 		task.State = newState
 		return true
 	} else {

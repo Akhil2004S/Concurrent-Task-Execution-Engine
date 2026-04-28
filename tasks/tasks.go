@@ -20,6 +20,10 @@ type TaskQueue struct {
 	Tasks chan *Task
 }
 
+type RetryQueue struct {
+	Tasks chan *Task
+}
+
 func CreateTasks(id int, taskType string, queue *TaskQueue, taskWg *sync.WaitGroup, data ...any) error {
 	switch taskType {
 	case "add":

@@ -1,11 +1,11 @@
 package workers
 
 import (
+	"context"
 	"execEngine/tasks"
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 )
 
 type Result struct {
@@ -15,24 +15,26 @@ type Result struct {
 	failureData tasks.Failure
 }
 
-func Worker(id int, taskQueue *tasks.TaskQueue, wg *sync.WaitGroup, taskWg *sync.WaitGroup) {
+func Worker(id int, taskQueue *tasks.TaskQueue, retryQueue *tasks.RetryQueue, wg *sync.WaitGroup, taskWg *sync.WaitGroup, schedulerWg *sync.WaitGroup) {
 	defer wg.Done()
-	var resultChan chan Result
+	defer schedulerWg.Done()
 	for task := range taskQueue.Tasks {
 		success := task.ChangeTaskState(tasks.Running)
 		if !success {
-			panic("Impossible state transition performed")
+			fmt.Println("================Impossible state transition performed===================")
 		}
 
-		resultChan = make(chan Result, 1)
+		ctx, cancel := context.WithTimeout(context.Background(), task.TimeLimit)
+		defer cancel()
+		resultChan := make(chan Result, 1)
 		attemptID := task.RetryData.RetryCount
-		go executeTask(task, attemptID, resultChan)
+		go executeTask(ctx, task.Data, task.TaskType, attemptID, resultChan)
 
 		select {
 		case result := <-resultChan:
 			if attemptID == task.RetryData.RetryCount && result.isSuccess {
 				task.ChangeTaskState(tasks.Completed)
-				fmt.Printf("Task completed. ID :%d. The result is: %v\n", task.Id, result.taskResult)
+				fmt.Printf("Task completed. ID :%d. The result is: %v. Worker Id: %d\n", task.Id, result.taskResult, id)
 			} else if attemptID != task.RetryData.RetryCount && result.isSuccess {
 				fmt.Println("The result is ignored due to late completion")
 			} else if attemptID != task.RetryData.RetryCount && !result.isSuccess {
@@ -44,35 +46,50 @@ func Worker(id int, taskQueue *tasks.TaskQueue, wg *sync.WaitGroup, taskWg *sync
 				task.ChangeTaskState(tasks.Failed)
 			}
 
-		case _ = <-time.After(task.TimeLimit):
-			if attemptID == task.RetryData.RetryCount {
-				fmt.Println("Execution timeout")
-				task.FailureData = tasks.Failure{
-					Type:           "Timeout",
-					Reason:         "Exceeded time limit",
-					Classification: tasks.Transient,
+		case <-ctx.Done():
+			select {
+			case result := <-resultChan:
+				fmt.Println("Timed out and completed at the same time. Shit")
+				if attemptID == task.RetryData.RetryCount && result.isSuccess {
+					task.ChangeTaskState(tasks.Completed)
+					fmt.Printf("Task completed. ID :%d. The result is: %v. Worker Id: %d\n", task.Id, result.taskResult, id)
+				} else if attemptID != task.RetryData.RetryCount && result.isSuccess {
+					fmt.Println("The result is ignored due to late completion")
+				} else if attemptID != task.RetryData.RetryCount && !result.isSuccess {
+					fmt.Println("Ignore. Old execution")
+				} else {
+					fmt.Println("Task has failed sucessfully")
+					task.FailureData = result.failureData
+					fmt.Println("Failure is due to", task.FailureData.Reason)
+					task.ChangeTaskState(tasks.Failed)
 				}
-				task.ChangeTaskState(tasks.Failed)
-			} else {
-				fmt.Println("Ignored update. Late execution")
+			default:
+				if attemptID == task.RetryData.RetryCount {
+					fmt.Println("Execution timeout")
+					task.FailureData = tasks.Failure{
+						Type:           "Timeout",
+						Reason:         "Exceeded time limit",
+						Classification: tasks.Transient,
+					}
+					task.ChangeTaskState(tasks.Failed)
+				} else {
+					fmt.Println("Ignored update. Late execution")
+				}
 			}
 		}
 
-		addToQueue := shouldRetry(task, id)
+		addToQueue := ShouldRetry(task, id)
 		fmt.Println("Retry decision:", addToQueue)
 		if addToQueue {
 			task.RetryData.RetryCount = task.RetryData.RetryCount + 1
-			time.Sleep(10 * time.Millisecond)
-			taskQueue.Tasks <- task
+			retryQueue.Tasks <- task
 		} else {
 			taskWg.Done()
 		}
-		fmt.Printf("Task: %d Worker: %d State: %s\n", task.Id, id, tasks.TaskStateName[task.State])
-		// time.Sleep(1 * time.Millisecond)
 	}
 }
 
-func executeTask(task *tasks.Task, attempId int, result chan Result) {
+func executeTask(ctx context.Context, taskData []any, taskType string, attempId int, result chan Result) {
 	sent := false
 	defer func() {
 		if r := recover(); r != nil {
@@ -86,9 +103,7 @@ func executeTask(task *tasks.Task, attempId int, result chan Result) {
 					Classification: tasks.System,
 				},
 			}
-			result <- computeResult
-			sent = true
-			return
+			sent = SendResult(ctx, result, computeResult)
 		}
 		if !sent {
 			computeResult := Result{
@@ -96,20 +111,19 @@ func executeTask(task *tasks.Task, attempId int, result chan Result) {
 				attemptID:  attempId,
 				isSuccess:  false,
 				failureData: tasks.Failure{
-					Type:           "Not sent",
+					Type:           "Cancelled",
 					Reason:         "Value not received by the channel",
 					Classification: tasks.System,
 				},
 			}
-			result <- computeResult
-			sent = true
+			sent = SendResult(ctx, result, computeResult)
 		}
 	}()
 
-	switch task.TaskType {
+	switch taskType {
 	case "add":
 		var sum float64
-		for _, number := range task.Data {
+		for _, number := range taskData {
 			if value, ok := (number.(float64)); ok {
 				sum += value
 			} else if value, ok := (number.(int)); ok {
@@ -122,16 +136,17 @@ func executeTask(task *tasks.Task, attempId int, result chan Result) {
 			isSuccess:   true,
 			failureData: tasks.Failure{},
 		}
-		result <- computeResult
+		sent = SendResult(ctx, result, computeResult)
 
 	case "mul":
 		product := 1.0
-		for _, number := range task.Data {
+		for _, number := range taskData {
 			if value, dataType := (number.(float64)); dataType {
 				product *= value
 			} else if value, dataType := (number.(int)); dataType {
 				product *= float64(value)
 			}
+
 		}
 		computeResult := Result{
 			taskResult:  product,
@@ -139,11 +154,11 @@ func executeTask(task *tasks.Task, attempId int, result chan Result) {
 			isSuccess:   true,
 			failureData: tasks.Failure{},
 		}
-		result <- computeResult
+		sent = SendResult(ctx, result, computeResult)
 
 	case "print":
 		var messageList []string
-		for _, message := range task.Data {
+		for _, message := range taskData {
 			if value, dataType := (message.(string)); dataType {
 				messageList = append(messageList, value)
 			}
@@ -156,7 +171,7 @@ func executeTask(task *tasks.Task, attempId int, result chan Result) {
 			isSuccess:   true,
 			failureData: tasks.Failure{},
 		}
-		result <- computeResult
+		sent = SendResult(ctx, result, computeResult)
 
 	default:
 		computeResult := Result{
@@ -169,17 +184,6 @@ func executeTask(task *tasks.Task, attempId int, result chan Result) {
 				Classification: tasks.Permanent,
 			},
 		}
-		result <- computeResult
+		sent = SendResult(ctx, result, computeResult)
 	}
-}
-
-func shouldRetry(task *tasks.Task, workerId int) bool {
-	if task.State == tasks.Failed {
-		fmt.Printf("Task %d (%s). State: %s Retry Count: %d. Error Type:%s. Worker %d\n", task.Id, task.TaskType, tasks.TaskStateName[task.State], task.RetryData.RetryCount, tasks.ClassificationName[task.FailureData.Classification], workerId)
-		if task.FailureData.Classification != tasks.Permanent && task.RetryData.RetryCount < task.RetryData.RetryLimit {
-			return true
-		}
-		return false
-	}
-	return false
 }

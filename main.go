@@ -14,19 +14,18 @@ func main() {
 
 	taskQueue := &tasks.TaskQueue{}
 	retryQueue := &tasks.RetryQueue{}
-	taskQueue.Tasks = make(chan *tasks.Task)
+	taskQueue.Tasks = make(chan *tasks.Task, 7)
 	retryQueue.Tasks = make(chan *tasks.Task, 10)
 
 	var wg sync.WaitGroup
 	var taskWg sync.WaitGroup
-	var schedWg sync.WaitGroup
 
-	schedWg.Add(1)
-	go scheduler.Schedule(&schedWg, retryQueue.Tasks)
+	// schedWg.Add(1)
+	go scheduler.Schedule(taskQueue, retryQueue)
 
 	for w := range numWorkers {
 		wg.Add(1)
-		go workers.Worker(w, taskQueue, retryQueue, &wg, &taskWg, &schedWg)
+		go workers.Worker(w, taskQueue, retryQueue, &wg, &taskWg)
 	}
 
 	for id := range 3 {
@@ -36,7 +35,7 @@ func main() {
 		}
 	}
 
-	// for id := range 1 {
+	// for id := range 3 {
 	// 	err := tasks.CreateTasks(id, "mul", taskQueue, &taskWg, 1, 1)
 	// 	if err != nil {
 	// 		fmt.Println(err)
@@ -45,6 +44,7 @@ func main() {
 
 	taskWg.Wait()
 	close(taskQueue.Tasks)
+	close(retryQueue.Tasks)
 	wg.Wait()
-	schedWg.Wait()
+	// schedWg.Wait()
 }

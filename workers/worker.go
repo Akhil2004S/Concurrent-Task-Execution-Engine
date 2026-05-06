@@ -15,9 +15,8 @@ type Result struct {
 	failureData tasks.Failure
 }
 
-func Worker(id int, taskQueue *tasks.TaskQueue, retryQueue *tasks.RetryQueue, wg *sync.WaitGroup, taskWg *sync.WaitGroup, schedulerWg *sync.WaitGroup) {
+func Worker(id int, taskQueue *tasks.TaskQueue, retryQueue *tasks.RetryQueue, wg *sync.WaitGroup, taskWg *sync.WaitGroup) {
 	defer wg.Done()
-	defer schedulerWg.Done()
 	for task := range taskQueue.Tasks {
 		success := task.ChangeTaskState(tasks.Running)
 		if !success {
@@ -25,7 +24,7 @@ func Worker(id int, taskQueue *tasks.TaskQueue, retryQueue *tasks.RetryQueue, wg
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), task.TimeLimit)
-		defer cancel()
+
 		resultChan := make(chan Result, 1)
 		attemptID := task.RetryData.RetryCount
 		go executeTask(ctx, task.Data, task.TaskType, attemptID, resultChan)
@@ -34,7 +33,7 @@ func Worker(id int, taskQueue *tasks.TaskQueue, retryQueue *tasks.RetryQueue, wg
 		case result := <-resultChan:
 			if attemptID == task.RetryData.RetryCount && result.isSuccess {
 				task.ChangeTaskState(tasks.Completed)
-				fmt.Printf("Task completed. ID :%d. The result is: %v. Worker Id: %d\n", task.Id, result.taskResult, id)
+				fmt.Printf("Task completed. ID: %d. The result is: %v. Worker Id: %d\n", task.Id, result.taskResult, id)
 			} else if attemptID != task.RetryData.RetryCount && result.isSuccess {
 				fmt.Println("The result is ignored due to late completion")
 			} else if attemptID != task.RetryData.RetryCount && !result.isSuccess {
@@ -81,11 +80,13 @@ func Worker(id int, taskQueue *tasks.TaskQueue, retryQueue *tasks.RetryQueue, wg
 		addToQueue := ShouldRetry(task, id)
 		fmt.Println("Retry decision:", addToQueue)
 		if addToQueue {
-			task.RetryData.RetryCount = task.RetryData.RetryCount + 1
+			fmt.Printf("The following task is gonna be retried. Task id:%d, reason:%s\n", task.Id, task.FailureData.Reason)
+			task.RetryData.RetryCount++
 			retryQueue.Tasks <- task
 		} else {
 			taskWg.Done()
 		}
+		cancel()
 	}
 }
 

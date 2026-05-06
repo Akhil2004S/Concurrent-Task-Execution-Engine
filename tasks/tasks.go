@@ -61,10 +61,10 @@ func CreateTasks(id int, taskType string, queue *TaskQueue, taskWg *sync.WaitGro
 		Data:        data,
 		State:       Pending,
 		FailureData: Failure{},
-		RetryData:   Retry{RetryLimit: 1},
+		RetryData:   Retry{RetryLimit: 3},
 		TimeLimit:   1 * time.Nanosecond,
 	}
-	queue.Tasks <- task
 	taskWg.Add(1)
+	queue.Tasks <- task
 	return nil
 }

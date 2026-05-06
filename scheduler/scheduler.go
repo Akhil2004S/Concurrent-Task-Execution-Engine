@@ -3,17 +3,13 @@ package scheduler
 import (
 	"execEngine/tasks"
 	"fmt"
-	"sync"
 )
 
-func AddToRetryQ(taskQ tasks.TaskQueue, retryQ tasks.RetryQueue) {
-	for retryTask := range retryQ.Tasks {
-		taskQ.Tasks <- retryTask
-	}
-}
-
-func Schedule(wg *sync.WaitGroup, retryChan chan *tasks.Task) {
-	for retryTasks := range retryChan {
-		fmt.Println(retryTasks)
+func Schedule(taskQ *tasks.TaskQueue, retryQ *tasks.RetryQueue) {
+	for retryTasks := range retryQ.Tasks {
+		fmt.Println("============================Scheduler Retry=================================")
+		fmt.Printf("THE RETRY TASKS. ID: %d\n", retryTasks.Id)
+		taskQ.Tasks <- retryTasks
+		fmt.Println("-----------------------Task added for retry-----------------------------")
 	}
 }

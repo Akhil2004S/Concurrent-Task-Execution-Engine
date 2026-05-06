@@ -1,5 +1,7 @@
 package tasks
 
+// File containing all the failure names and stuff. It is self explanatory
+
 type FailureClassification int
 
 const (

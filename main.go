@@ -10,41 +10,41 @@ import (
 )
 
 func main() {
+	// Set the number of workers manually. Should be based on the resources available
 	numWorkers := 2
 
 	taskQueue := &tasks.TaskQueue{}
 	retryQueue := &tasks.RetryQueue{}
-	taskQueue.Tasks = make(chan *tasks.Task, 7)
-	retryQueue.Tasks = make(chan *tasks.Task, 10)
+	waitingQueue := &tasks.WaitingQueue{}
+	taskQueue.Tasks = make(chan *tasks.Task, 3)
+	retryQueue.Tasks = make(chan *tasks.Task, 1)
+	waitingQueue.Tasks = make(chan *tasks.Task, 2)
 
 	var wg sync.WaitGroup
 	var taskWg sync.WaitGroup
+	var schedulerWg sync.WaitGroup
 
-	// schedWg.Add(1)
-	go scheduler.Schedule(taskQueue, retryQueue)
+	schedulerWg.Add(1)
+	go scheduler.Schedule(&schedulerWg, taskQueue, retryQueue, waitingQueue)
 
 	for w := range numWorkers {
 		wg.Add(1)
 		go workers.Worker(w, taskQueue, retryQueue, &wg, &taskWg)
 	}
 
+	// Creating dummy tasks that add two numbers for testing purposes
 	for id := range 3 {
-		err := tasks.CreateTasks(id, "add", taskQueue, &taskWg, 1, 1)
+		err := tasks.CreateTasks(id, "add", waitingQueue, &taskWg, 1, 1)
 		if err != nil {
 			fmt.Println(err)
 		}
 	}
 
-	// for id := range 3 {
-	// 	err := tasks.CreateTasks(id, "mul", taskQueue, &taskWg, 1, 1)
-	// 	if err != nil {
-	// 		fmt.Println(err)
-	// 	}
-	// }
-
+	// Makes sure that the queues are not closed until all the tasks are completed
 	taskWg.Wait()
-	close(taskQueue.Tasks)
+	close(waitingQueue.Tasks)
 	close(retryQueue.Tasks)
+	schedulerWg.Wait()
+	close(taskQueue.Tasks)
 	wg.Wait()
-	// schedWg.Wait()
 }

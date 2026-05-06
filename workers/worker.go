@@ -8,6 +8,7 @@ import (
 	"sync"
 )
 
+// Struct to store the result of the task completed
 type Result struct {
 	taskResult  any
 	attemptID   int
@@ -15,29 +16,37 @@ type Result struct {
 	failureData tasks.Failure
 }
 
+// Worker that picks a task from the queue and executes it
 func Worker(id int, taskQueue *tasks.TaskQueue, retryQueue *tasks.RetryQueue, wg *sync.WaitGroup, taskWg *sync.WaitGroup) {
 	defer wg.Done()
 	for task := range taskQueue.Tasks {
+		// Task state updated before starting execution
 		success := task.ChangeTaskState(tasks.Running)
 		if !success {
 			fmt.Println("================Impossible state transition performed===================")
 		}
 
+		// Context for the implementing timeout of tasks
 		ctx, cancel := context.WithTimeout(context.Background(), task.TimeLimit)
 
+		// Channel to store the result of the task. It is of the result struct type
 		resultChan := make(chan Result, 1)
+
+		// The attempt ID is the attempt number of the task. Stored to check for stale updates
 		attemptID := task.RetryData.RetryCount
 		go executeTask(ctx, task.Data, task.TaskType, attemptID, resultChan)
 
+		// Blocking operation that waits for either the result or a timeout
+		// The result can be a success or a failure
 		select {
 		case result := <-resultChan:
 			if attemptID == task.RetryData.RetryCount && result.isSuccess {
-				task.ChangeTaskState(tasks.Completed)
+				task.ChangeTaskState(tasks.Completed) // State change of task
 				fmt.Printf("Task completed. ID: %d. The result is: %v. Worker Id: %d\n", task.Id, result.taskResult, id)
-			} else if attemptID != task.RetryData.RetryCount && result.isSuccess {
+			} else if attemptID != task.RetryData.RetryCount && result.isSuccess { // This is stale update where old goroutine execution tries to update the state
 				fmt.Println("The result is ignored due to late completion")
 			} else if attemptID != task.RetryData.RetryCount && !result.isSuccess {
-				fmt.Println("Ignore. Old execution")
+				fmt.Println("Ignore. Old execution failed")
 			} else {
 				fmt.Println("Task has failed sucessfully")
 				task.FailureData = result.failureData
@@ -45,8 +54,10 @@ func Worker(id int, taskQueue *tasks.TaskQueue, retryQueue *tasks.RetryQueue, wg
 				task.ChangeTaskState(tasks.Failed)
 			}
 
+		// Handles task timeout
 		case <-ctx.Done():
 			select {
+			// Checks if the result exists when a timeout occurs meaning that both the execution completion and timeout fired at the same timing
 			case result := <-resultChan:
 				fmt.Println("Timed out and completed at the same time. Shit")
 				if attemptID == task.RetryData.RetryCount && result.isSuccess {
@@ -62,6 +73,7 @@ func Worker(id int, taskQueue *tasks.TaskQueue, retryQueue *tasks.RetryQueue, wg
 					fmt.Println("Failure is due to", task.FailureData.Reason)
 					task.ChangeTaskState(tasks.Failed)
 				}
+			// If the task is timed out without any result, this block updates the necessary stuff
 			default:
 				if attemptID == task.RetryData.RetryCount {
 					fmt.Println("Execution timeout")
@@ -77,6 +89,7 @@ func Worker(id int, taskQueue *tasks.TaskQueue, retryQueue *tasks.RetryQueue, wg
 			}
 		}
 
+		// Checks if failed tasks should retry based on the classification of the failure
 		addToQueue := ShouldRetry(task, id)
 		fmt.Println("Retry decision:", addToQueue)
 		if addToQueue {
@@ -90,6 +103,8 @@ func Worker(id int, taskQueue *tasks.TaskQueue, retryQueue *tasks.RetryQueue, wg
 	}
 }
 
+// The execution logic of the tasks
+// Here results are sent to the result channel as a struct which is caught by the worker
 func executeTask(ctx context.Context, taskData []any, taskType string, attempId int, result chan Result) {
 	sent := false
 	defer func() {

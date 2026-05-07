@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 // Struct to store the result of the task completed
@@ -17,9 +19,10 @@ type Result struct {
 }
 
 // Worker that picks a task from the queue and executes it
-func Worker(id int, taskQueue *tasks.TaskQueue, retryQueue *tasks.RetryQueue, wg *sync.WaitGroup, taskWg *sync.WaitGroup) {
+func Worker(id int, taskQueue *tasks.TaskQueue, retryQueue *tasks.RetryQueue, metrics *tasks.Metrics, wg *sync.WaitGroup, taskWg *sync.WaitGroup) {
 	defer wg.Done()
 	for task := range taskQueue.Tasks {
+		task.ExecutionStartedAt = time.Now() // Storing the time at which execution started
 		// Task state updated before starting execution
 		success := task.ChangeTaskState(tasks.Running)
 		if !success {
@@ -42,6 +45,9 @@ func Worker(id int, taskQueue *tasks.TaskQueue, retryQueue *tasks.RetryQueue, wg
 		case result := <-resultChan:
 			if attemptID == task.RetryData.RetryCount && result.isSuccess {
 				task.ChangeTaskState(tasks.Completed) // State change of task
+				atomic.AddInt64(&metrics.TotalLatencyMs, int64(time.Since(task.SubmittedAt)))
+				atomic.AddInt64(&metrics.TotalExecutionLatencyMs, int64(time.Since(task.ExecutionStartedAt)))
+				atomic.AddInt64(&metrics.CompletedTasks, 1)
 				fmt.Printf("Task completed. ID: %d. The result is: %v. Worker Id: %d\n", task.Id, result.taskResult, id)
 			} else if attemptID != task.RetryData.RetryCount && result.isSuccess { // This is stale update where old goroutine execution tries to update the state
 				fmt.Println("The result is ignored due to late completion")
@@ -62,7 +68,10 @@ func Worker(id int, taskQueue *tasks.TaskQueue, retryQueue *tasks.RetryQueue, wg
 				fmt.Println("Timed out and completed at the same time. Shit")
 				if attemptID == task.RetryData.RetryCount && result.isSuccess {
 					task.ChangeTaskState(tasks.Completed)
-					fmt.Printf("Task completed. ID :%d. The result is: %v. Worker Id: %d\n", task.Id, result.taskResult, id)
+					atomic.AddInt64(&metrics.TotalLatencyMs, int64(time.Since(task.SubmittedAt)))
+					atomic.AddInt64(&metrics.TotalExecutionLatencyMs, int64(time.Since(task.ExecutionStartedAt)))
+					atomic.AddInt64(&metrics.CompletedTasks, 1)
+					// fmt.Printf("Task completed. ID :%d. The result is: %v. Worker Id: %d\n", task.Id, result.taskResult, id)
 				} else if attemptID != task.RetryData.RetryCount && result.isSuccess {
 					fmt.Println("The result is ignored due to late completion")
 				} else if attemptID != task.RetryData.RetryCount && !result.isSuccess {
@@ -90,11 +99,12 @@ func Worker(id int, taskQueue *tasks.TaskQueue, retryQueue *tasks.RetryQueue, wg
 		}
 
 		// Checks if failed tasks should retry based on the classification of the failure
-		addToQueue := ShouldRetry(task, id)
-		fmt.Println("Retry decision:", addToQueue)
+		addToQueue := ShouldRetry(task, id, metrics)
+		// fmt.Println("Retry decision:", addToQueue)
 		if addToQueue {
-			fmt.Printf("The following task is gonna be retried. Task id:%d, reason:%s\n", task.Id, task.FailureData.Reason)
+			// fmt.Printf("The following task is gonna be retried. Task id:%d, reason:%s\n", task.Id, task.FailureData.Reason)
 			task.RetryData.RetryCount++
+			atomic.AddInt64(&metrics.RetryCount, 1)
 			retryQueue.Tasks <- task
 		} else {
 			taskWg.Done()
@@ -120,8 +130,7 @@ func executeTask(ctx context.Context, taskData []any, taskType string, attempId 
 				},
 			}
 			sent = SendResult(ctx, result, computeResult)
-		}
-		if !sent {
+		} else if !sent {
 			computeResult := Result{
 				taskResult: 0,
 				attemptID:  attempId,
@@ -138,6 +147,7 @@ func executeTask(ctx context.Context, taskData []any, taskType string, attempId 
 
 	switch taskType {
 	case "add":
+		time.Sleep(1 * time.Millisecond)
 		var sum float64
 		for _, number := range taskData {
 			if value, ok := (number.(float64)); ok {

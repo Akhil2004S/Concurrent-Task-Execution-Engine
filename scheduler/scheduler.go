@@ -11,6 +11,7 @@ import (
 func Schedule(wg *sync.WaitGroup, taskQ *tasks.TaskQueue, retryQ *tasks.RetryQueue, waitQ *tasks.WaitingQueue) {
 	fmt.Println("Scheduler active")
 	for {
+		fmt.Printf("Len of task queue:%d, capacity of task queue:%d\n", len(taskQ.Tasks), cap(taskQ.Tasks))
 		select {
 		case task, ok := <-waitQ.Tasks:
 			if !ok {
@@ -24,7 +25,6 @@ func Schedule(wg *sync.WaitGroup, taskQ *tasks.TaskQueue, retryQ *tasks.RetryQue
 			}
 			// Add waiting task to main task queue
 			taskQ.Tasks <- task
-			fmt.Println("Pushed to main queue")
 		case task, ok := <-retryQ.Tasks:
 			if !ok {
 				retryQ.Tasks = nil

@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"execEngine/tasks"
 	"fmt"
 	"sync"
@@ -8,10 +9,9 @@ import (
 
 // A simple scheduler that pushes tasks into the queue that the worker consumes
 // It handles both waiting queue and retry queue
-func Schedule(wg *sync.WaitGroup, taskQ *tasks.TaskQueue, retryQ *tasks.RetryQueue, waitQ *tasks.WaitingQueue) {
+func Schedule(interrput context.Context, wg *sync.WaitGroup, taskQ *tasks.TaskQueue, retryQ *tasks.RetryQueue, waitQ *tasks.WaitingQueue) {
 	fmt.Println("Scheduler active")
 	for {
-		fmt.Printf("Len of task queue:%d, capacity of task queue:%d\n", len(taskQ.Tasks), cap(taskQ.Tasks))
 		select {
 		case task, ok := <-waitQ.Tasks:
 			if !ok {
@@ -24,7 +24,13 @@ func Schedule(wg *sync.WaitGroup, taskQ *tasks.TaskQueue, retryQ *tasks.RetryQue
 				continue
 			}
 			// Add waiting task to main task queue
-			taskQ.Tasks <- task
+			select {
+			case taskQ.Tasks <- task:
+			case <-interrput.Done():
+				wg.Done()
+				return
+			}
+
 		case task, ok := <-retryQ.Tasks:
 			if !ok {
 				retryQ.Tasks = nil
@@ -38,8 +44,17 @@ func Schedule(wg *sync.WaitGroup, taskQ *tasks.TaskQueue, retryQ *tasks.RetryQue
 			// Add retried task to main task queue
 			fmt.Println("============================Scheduler Retry=================================")
 			fmt.Printf("THE RETRY TASKS. ID: %d\n", task.Id)
-			taskQ.Tasks <- task
+			select {
+			case taskQ.Tasks <- task:
+			case <-interrput.Done():
+				wg.Done()
+				return
+			}
 			fmt.Println("-----------------------Task added for retry-----------------------------")
+		case <-interrput.Done():
+			fmt.Println("Schduler interrupted. Exiting")
+			wg.Done()
+			return
 		}
 
 	}

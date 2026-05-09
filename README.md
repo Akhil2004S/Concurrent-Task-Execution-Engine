@@ -5,6 +5,8 @@ A concurrent task execution engine built in Go to explore and understand the con
 ## What it does
 This engine concurrently executes tasks using a number of workers, retries failed tasks based on failure classification, tracks metrics, and manages task state throughout the lifecycle. The current task types are simple arithmetic operations. But this architecture is designed to handle any task type without modification to the core engine (You might wanna change the retry limit and task timeout. IF you are considering on using this which I highly doubt it).
 ## Architecture
+<img width="889" height="1041" alt="ConcExecEngine" src="https://github.com/user-attachments/assets/176defe6-1cef-47bd-a93f-ee572d72ba55" />
+
 ### Task Lifecycle
 Submission — Tasks are submitted to a waiting queue. If the waiting queue is full, the task is dropped immediately and reported back to the caller. Once in the waiting queue, the task is in pending state. If a task enters the waiting queue it will be executed for sure unless the engine is interrupted\
 Scheduling — A dedicated scheduler moves tasks from the waiting queue to the task queue. If the task queue is full, the scheduler blocks until space is available — tasks wait in the waiting queue rather than being dropped at this stage. More on why I implemented a scheduler is down the line.\
